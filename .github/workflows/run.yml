@@ -3,7 +3,7 @@ name: Cloud check in action
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 8 * * *'
+    - cron: '0 23 * * *' # UTC 时间 23:00 对应北京时间 7:00
 
 concurrency:
   group: cloud-check-in-action
@@ -21,8 +21,8 @@ jobs:
         run: |
           # 生成 8 点到 10 点之间的两个随机分钟
           RANDOM_MINUTES=$(shuf -i 0-119 -n 2 | sort -n)
-          FIRST_MINUTE=${RANDOM_MINUTES[0]}
-          SECOND_MINUTE=${RANDOM_MINUTES[1]}
+          FIRST_MINUTE=$(echo $RANDOM_MINUTES | cut -d' ' -f1)
+          SECOND_MINUTE=$(echo $RANDOM_MINUTES | cut -d' ' -f2)
           # 将分钟转换为小时和分钟格式
           FIRST_HOUR=$((8 + FIRST_MINUTE / 60))
           FIRST_MINUTE=$((FIRST_MINUTE % 60))
@@ -49,6 +49,7 @@ jobs:
             TARGET_TIME=$((TARGET_TIME + 86400))
           fi
           WAIT_TIME=$((TARGET_TIME - CURRENT_TIME))
+          echo "Sleeping for $WAIT_TIME seconds."
           sleep $WAIT_TIME
       - name: Checkout code
         uses: actions/checkout@v3
@@ -69,6 +70,7 @@ jobs:
             TARGET_TIME=$((TARGET_TIME + 86400))
           fi
           WAIT_TIME=$((TARGET_TIME - CURRENT_TIME))
+          echo "Sleeping for $WAIT_TIME seconds."
           sleep $WAIT_TIME
       - name: Checkout code
         uses: actions/checkout@v3
