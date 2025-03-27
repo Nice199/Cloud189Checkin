@@ -5,6 +5,10 @@ on:
   schedule:
     - cron: '0 8 * * *'
 
+concurrency:
+  group: cloud-check-in-action
+  cancel-in-progress: true
+
 jobs:
   generate-random-times:
     runs-on: ubuntu-latest
@@ -16,20 +20,20 @@ jobs:
         id: generate
         run: |
           # 生成 8 点到 10 点之间的两个随机分钟
-          FIRST_MINUTE=$(shuf -i 0-119 -n 1)
-          SECOND_MINUTE=$(shuf -i 0-119 -n 1)
-          # 确保两个时间不同
-          while [ "$FIRST_MINUTE" -eq "$SECOND_MINUTE" ]; do
-            SECOND_MINUTE=$(shuf -i 0-119 -n 1)
-          done
+          RANDOM_MINUTES=$(shuf -i 0-119 -n 2 | sort -n)
+          FIRST_MINUTE=${RANDOM_MINUTES[0]}
+          SECOND_MINUTE=${RANDOM_MINUTES[1]}
           # 将分钟转换为小时和分钟格式
           FIRST_HOUR=$((8 + FIRST_MINUTE / 60))
           FIRST_MINUTE=$((FIRST_MINUTE % 60))
           SECOND_HOUR=$((8 + SECOND_MINUTE / 60))
           SECOND_MINUTE=$((SECOND_MINUTE % 60))
+          # 格式化时间
+          FIRST_TIME=$(printf "%02d:%02d" $FIRST_HOUR $FIRST_MINUTE)
+          SECOND_TIME=$(printf "%02d:%02d" $SECOND_HOUR $SECOND_MINUTE)
           # 输出结果
-          echo "first-time=$FIRST_HOUR:$FIRST_MINUTE" >> $GITHUB_OUTPUT
-          echo "second-time=$SECOND_HOUR:$SECOND_MINUTE" >> $GITHUB_OUTPUT
+          echo "first-time=$FIRST_TIME" >> $GITHUB_OUTPUT
+          echo "second-time=$SECOND_TIME" >> $GITHUB_OUTPUT
 
   first-run:
     needs: generate-random-times
@@ -37,8 +41,10 @@ jobs:
     steps:
       - name: Wait for the first random time
         run: |
+          export TZ=Asia/Shanghai
+          echo "Waiting for first random time: ${{ needs.generate-random-times.outputs.first-time }}"
           CURRENT_TIME=$(date +%s)
-          TARGET_TIME=$(date -d "${{ needs.generate-random-times.outputs.first-time }}" +%s)
+          TARGET_TIME=$(date -d "${{ needs.generate-random-times.outputs.first-time }}" +%s || exit 1)
           if [ $TARGET_TIME -lt $CURRENT_TIME ]; then
             TARGET_TIME=$((TARGET_TIME + 86400))
           fi
@@ -55,8 +61,10 @@ jobs:
     steps:
       - name: Wait for the second random time
         run: |
+          export TZ=Asia/Shanghai
+          echo "Waiting for second random time: ${{ needs.generate-random-times.outputs.second-time }}"
           CURRENT_TIME=$(date +%s)
-          TARGET_TIME=$(date -d "${{ needs.generate-random-times.outputs.second-time }}" +%s)
+          TARGET_TIME=$(date -d "${{ needs.generate-random-times.outputs.second-time }}" +%s || exit 1)
           if [ $TARGET_TIME -lt $CURRENT_TIME ]; then
             TARGET_TIME=$((TARGET_TIME + 86400))
           fi
@@ -66,11 +74,10 @@ jobs:
         uses: actions/checkout@v3
       - name: Run the second task
         run: echo "This is the second randomly scheduled task running between 8 - 10 AM."
-    
-      - name: 🎉 Delete old workflow run
+      - name: 🎉 Delete old workflow runs
         uses: Mattraks/delete-workflow-runs@main
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
-          retain_days: 0
-          keep_minimum_runs: 50
+          retain_days: 30
+          keep_minimum_runs: 10
