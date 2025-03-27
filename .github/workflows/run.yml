@@ -1,77 +1,72 @@
 name: Cloud check in action
+
 on:
-  push:
-    branches:
-      - main
-  watch:
-    types: started
   workflow_dispatch:
   schedule:
-    - cron: 35 2 * * *
+    - cron: '0 8 * * *'
+
 jobs:
-  build-and-deploy:
+  generate-random-times:
     runs-on: ubuntu-latest
-    environment: user
+    outputs:
+      first-time: ${{ steps.generate.outputs.first-time }}
+      second-time: ${{ steps.generate.outputs.second-time }}
     steps:
-      - name: 🔀 random delay 0-300 seconds
-        run: sleep $((RANDOM % 301))
-
-      - name: 🔌 Check out code
-        uses: actions/checkout@main
-
-      - name: 🔨 Setup Node.js environment
-        uses: actions/setup-node@main
-        with:
-          node-version: 18
-          cache: npm
-
-      - name: 👾 Check if Debug is true
-        if: vars.debug == '1'
+      - name: Generate two random times
+        id: generate
         run: |
-          echo "CLOUD189_VERBOSE=1" >> $GITHUB_ENV
-      
-      - name: 📹 Restore cached Cookie
-        id: cache-cookie-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: .token
-          key: ${{ runner.os }}-cache-token
-          restore-keys: ${{ runner.os }}-cache-token-
+          # 生成 8 点到 10 点之间的两个随机分钟
+          FIRST_MINUTE=$(shuf -i 0-119 -n 1)
+          SECOND_MINUTE=$(shuf -i 0-119 -n 1)
+          # 确保两个时间不同
+          while [ "$FIRST_MINUTE" -eq "$SECOND_MINUTE" ]; do
+            SECOND_MINUTE=$(shuf -i 0-119 -n 1)
+          done
+          # 将分钟转换为小时和分钟格式
+          FIRST_HOUR=$((8 + FIRST_MINUTE / 60))
+          FIRST_MINUTE=$((FIRST_MINUTE % 60))
+          SECOND_HOUR=$((8 + SECOND_MINUTE / 60))
+          SECOND_MINUTE=$((SECOND_MINUTE % 60))
+          # 输出结果
+          echo "first-time=$FIRST_HOUR:$FIRST_MINUTE" >> $GITHUB_OUTPUT
+          echo "second-time=$SECOND_HOUR:$SECOND_MINUTE" >> $GITHUB_OUTPUT
 
-      - name: 🔧 Init secrets
-        uses: shine1594/secrets-to-env-action@master
-        with:
-          secrets: ${{ toJSON(secrets) }}
-          secrets_env: production
-          prefix_prod: ""
-          file_name_prod: .env
-
-      - name: 📡 Init dependencies
-        run: npm install
-
-      - name: 🚀 Run
-        uses: nick-fields/retry@master
-        with:
-          timeout_minutes: 30
-          max_attempts: 3
-          command: npm start
-      
-      - name: 📹 Save cached Cookie
-        uses: actions/cache/save@v4
-        with:
-          path: .token
-          key: ${{ runner.os }}-cache-token-${{ hashFiles('.token/*.json') }}
-
-      - name: 🚗 Keep Running
-        if: github.event_name == 'schedule'
+  first-run:
+    needs: generate-random-times
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for the first random time
         run: |
-          git config --local user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
-          git config --local user.name "${{ github.actor }}"
-          git remote set-url origin https://${{ github.actor }}:${{ github.token }}@github.com/${{ github.repository }}
-          git pull --rebase --autostash
-          git commit --allow-empty -m "Keep Running..."
-          git push
+          CURRENT_TIME=$(date +%s)
+          TARGET_TIME=$(date -d "${{ needs.generate-random-times.outputs.first-time }}" +%s)
+          if [ $TARGET_TIME -lt $CURRENT_TIME ]; then
+            TARGET_TIME=$((TARGET_TIME + 86400))
+          fi
+          WAIT_TIME=$((TARGET_TIME - CURRENT_TIME))
+          sleep $WAIT_TIME
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Run the first task
+        run: echo "This is the first randomly scheduled task running between 8 - 10 AM."
 
+  second-run:
+    needs: generate-random-times
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for the second random time
+        run: |
+          CURRENT_TIME=$(date +%s)
+          TARGET_TIME=$(date -d "${{ needs.generate-random-times.outputs.second-time }}" +%s)
+          if [ $TARGET_TIME -lt $CURRENT_TIME ]; then
+            TARGET_TIME=$((TARGET_TIME + 86400))
+          fi
+          WAIT_TIME=$((TARGET_TIME - CURRENT_TIME))
+          sleep $WAIT_TIME
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Run the second task
+        run: echo "This is the second randomly scheduled task running between 8 - 10 AM."
+    
       - name: 🎉 Delete old workflow run
         uses: Mattraks/delete-workflow-runs@main
         with:
