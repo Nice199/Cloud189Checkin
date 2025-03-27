@@ -1,88 +1,81 @@
 name: Cloud check in action
-
 on:
+  push:
+    branches:
+      - main
+  watch:
+    types: started
   workflow_dispatch:
   schedule:
-    - cron: '0 23 * * *' # UTC 时间 23:00 对应北京时间 7:00
-
-concurrency:
-  group: cloud-check-in-action
-  cancel-in-progress: true
-
+    - cron: 35 2 * * *
 jobs:
-  generate-random-times:
+  build-and-deploy:
     runs-on: ubuntu-latest
-    outputs:
-      first-time: ${{ steps.generate.outputs.first-time }}
-      second-time: ${{ steps.generate.outputs.second-time }}
+    environment: user
     steps:
-      - name: Generate two random times
-        id: generate
-        run: |
-          echo "Generating random times..."
-          RANDOM_MINUTES=$(shuf -i 0-119 -n 2 | sort -n)
-          FIRST_MINUTE=$(echo $RANDOM_MINUTES | cut -d' ' -f1)
-          SECOND_MINUTE=$(echo $RANDOM_MINUTES | cut -d' ' -f2)
-          FIRST_HOUR=$((8 + FIRST_MINUTE / 60))
-          FIRST_MINUTE=$((FIRST_MINUTE % 60))
-          SECOND_HOUR=$((8 + SECOND_MINUTE / 60))
-          SECOND_MINUTE=$((SECOND_MINUTE % 60))
-          FIRST_TIME=$(printf "%02d:%02d" $FIRST_HOUR $FIRST_MINUTE)
-          SECOND_TIME=$(printf "%02d:%02d" $SECOND_HOUR $SECOND_MINUTE)
-          echo "First time: $FIRST_TIME"
-          echo "Second time: $SECOND_TIME"
-          echo "first-time=$FIRST_TIME" >> $GITHUB_OUTPUT
-          echo "second-time=$SECOND_TIME" >> $GITHUB_OUTPUT
+      - name: 🔀 random delay 0-300 seconds
+        run: sleep $((RANDOM % 301))
 
-  first-run:
-    needs: generate-random-times
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for the first random time
-        run: |
-          export TZ=Asia/Shanghai
-          echo "Waiting for first random time: ${{ needs.generate-random-times.outputs.first-time }}"
-          CURRENT_TIME=$(date +%s)
-          TARGET_TIME=$(date -d "${{ needs.generate-random-times.outputs.first-time }}" +%s || exit 1)
-          if [ $TARGET_TIME -lt $CURRENT_TIME ]; then
-            TARGET_TIME=$((TARGET_TIME + 86400))
-          fi
-          WAIT_TIME=$((TARGET_TIME - CURRENT_TIME))
-          echo "Sleeping for $WAIT_TIME seconds."
-          sleep $WAIT_TIME
-      - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Run the first task
-        run: |
-          echo "Running the first task..."
-          echo "This is the first randomly scheduled task running between 8 - 10 AM."
+      - name: 🔌 Check out code
+        uses: actions/checkout@main
 
-  second-run:
-    needs: generate-random-times
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for the second random time
+      - name: 🔨 Setup Node.js environment
+        uses: actions/setup-node@main
+        with:
+          node-version: 18
+          cache: npm
+
+      - name: 👾 Check if Debug is true
+        if: vars.debug == '1'
         run: |
-          export TZ=Asia/Shanghai
-          echo "Waiting for second random time: ${{ needs.generate-random-times.outputs.second-time }}"
-          CURRENT_TIME=$(date +%s)
-          TARGET_TIME=$(date -d "${{ needs.generate-random-times.outputs.second-time }}" +%s || exit 1)
-          if [ $TARGET_TIME -lt $CURRENT_TIME ]; then
-            TARGET_TIME=$((TARGET_TIME + 86400))
-          fi
-          WAIT_TIME=$((TARGET_TIME - CURRENT_TIME))
-          echo "Sleeping for $WAIT_TIME seconds."
-          sleep $WAIT_TIME
-      - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Run the second task
+          echo "CLOUD189_VERBOSE=1" >> $GITHUB_ENV
+      
+      - name: 📹 Restore cached Cookie
+        id: cache-cookie-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .token
+          key: ${{ runner.os }}-cache-token
+          restore-keys: ${{ runner.os }}-cache-token-
+
+      - name: 🔧 Init secrets
+        uses: shine1594/secrets-to-env-action@master
+        with:
+          secrets: ${{ toJSON(secrets) }}
+          secrets_env: production
+          prefix_prod: ""
+          file_name_prod: .env
+
+      - name: 📡 Init dependencies
+        run: npm install
+
+      - name: 🚀 Run
+        uses: nick-fields/retry@master
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          command: npm start
+
+      - name: 📹 Save cached Cookie
+        uses: actions/cache/save@v4
+        with:
+          path: .token
+          key: ${{ runner.os }}-cache-token-${{ hashFiles('.token/*.json') }}
+
+      - name: 🚗 Keep Running
+        if: github.event_name == 'schedule'
         run: |
-          echo "Running the second task..."
-          echo "This is the second randomly scheduled task running between 8 - 10 AM."
-      - name: 🎉 Delete old workflow runs
+          git config --local user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          git config --local user.name "${{ github.actor }}"
+          git remote set-url origin https://${{ github.actor }}:${{ github.token }}@github.com/${{ github.repository }}
+          git pull --rebase --autostash
+          git commit --allow-empty -m "Keep Running..."
+          git push
+
+      - name: 🎉 Delete old workflow run
         uses: Mattraks/delete-workflow-runs@main
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
-          retain_days: 30
-          keep_minimum_runs: 10
+          retain_days: 0
+          keep_minimum_runs: 50
